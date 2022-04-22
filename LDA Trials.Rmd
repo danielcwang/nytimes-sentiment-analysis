@@ -11,12 +11,57 @@ library(tidyverse)
 library(httr)
 library(curl)
 library(jsonlite)
+library(rvest)
+library(tm)
 ```
 
-Trial for importing data from New York Times API
+Import Godfather movie reviews
 
 ```{r}
 url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=godfather&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
-json_result <- url %>% curl() %>% readLines()
-prettify(json_result)
+json_result <- url %>% curl() %>% readLines() %>% fromJSON()
+json_result
+```
+
+```{r}
+url_html <- 'https://www.nytimes.com/2019/06/06/movies/the-black-godfather-review.html'
+url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2()
+```
+
+Create a function which extracts the text from each of the movie reviews using html web scraping
+
+```{r}
+extract_text <- function(json_result){
+  reviews <- json_result$result %>% 
+    dplyr::select(c('display_title','headline','link')) %>% 
+    mutate(url = link$url) %>%
+    select(-link)
+  review_text <-tibble(headline = '',text='')
+  for(i in 1:nrow(godfather_reviews)){
+    url_html <- godfather_reviews[i,3]
+    review_text <- review_text %>% add_row(headline = godfather_reviews[i,2], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
+  }
+  review_text <- review_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
+  return(review_text)
+}
+```
+
+Clean the movie review text
+
+```{r}
+review_text <- extract_text(json_result)
+review_text <- review_text %>% mutate(
+  clean_text = tolower(text),
+  clean_text = str_replace_all(clean_text,"['`]", ""), 
+  clean_text = str_replace_all(clean_text,"[[:punct:]]", " "),
+  clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
+  clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
+  clean_text = trimws(clean_text)) 
+```
+
+Turn the movie review text into a DTM (Document Term Matrix) for text mining.
+
+```{r}
+dtm_reviews <- tm::DocumentTermMatrix(tm::VCorpus(tm::VectorSource(review_text$clean_text)),control=list(wordLengths=c(1,Inf)))
+dtm_reviews
 ```
