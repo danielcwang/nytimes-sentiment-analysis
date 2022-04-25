@@ -13,11 +13,14 @@ library(curl)
 library(jsonlite)
 library(rvest)
 library(tm)
+library(tidytext)
+library(topicmodels)
 ```
 
 Import Godfather movie reviews
 
 ```{r}
+url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?opening-date=2000-01-01:2020-01-01&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
 url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=godfather&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
 json_result <- url %>% curl() %>% readLines() %>% fromJSON()
 json_result
@@ -37,9 +40,9 @@ extract_text <- function(json_result){
     mutate(url = link$url) %>%
     select(-link)
   review_text <-tibble(headline = '',text='')
-  for(i in 1:nrow(godfather_reviews)){
-    url_html <- godfather_reviews[i,3]
-    review_text <- review_text %>% add_row(headline = godfather_reviews[i,2], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
+  for(i in 1:nrow(reviews)){
+    url_html <- reviews[i,3]
+    review_text <- review_text %>% add_row(headline = reviews[i,2], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
   }
   review_text <- review_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
   return(review_text)
@@ -52,11 +55,13 @@ Clean the movie review text
 review_text <- extract_text(json_result)
 review_text <- review_text %>% mutate(
   clean_text = tolower(text),
-  clean_text = str_replace_all(clean_text,"['`]", ""), 
+  clean_text = str_replace_all(clean_text,"[['`’]]", ""), 
   clean_text = str_replace_all(clean_text,"[[:punct:]]", " "),
   clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
   clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
+  clean_text = removeWords(clean_text,stopwords("english")),
   clean_text = trimws(clean_text)) 
+
 ```
 
 Turn the movie review text into a DTM (Document Term Matrix) for text mining.
@@ -64,4 +69,29 @@ Turn the movie review text into a DTM (Document Term Matrix) for text mining.
 ```{r}
 dtm_reviews <- tm::DocumentTermMatrix(tm::VCorpus(tm::VectorSource(review_text$clean_text)),control=list(wordLengths=c(1,Inf)))
 dtm_reviews
+```
+
+```{r}
+raw.sum=apply(dtm_reviews,1,FUN=sum)
+dtm_reviews=dtm_reviews[raw.sum!=0,]
+reviews_lda <- LDA(dtm_reviews, k = 2)
+reviews_topics <- tidy(reviews_lda)
+reviews_topics
+```
+
+```{r}
+reviews_lda %>% tidy(matrix="gamma") %>%
+  group_by(document) %>%
+  top_n(1)
+```
+
+
+```{r}
+reviews_topics %>% filter(topic==1) %>% 
+  mutate(beta_rank = min_rank(desc(beta))) %>% 
+  filter(beta_rank <= 10) %>% 
+  arrange(beta_rank) %>%
+  mutate(term = reorder(term, beta)) %>% 
+  ggplot(aes(beta, term)) + 
+  geom_col(show.legend = FALSE)
 ```
