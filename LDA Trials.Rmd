@@ -15,20 +15,38 @@ library(rvest)
 library(tm)
 library(tidytext)
 library(topicmodels)
+library(textdata)
 ```
 
 Import Godfather movie reviews
 
 ```{r}
-url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?opening-date=2000-01-01:2020-01-01&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
-url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=godfather&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
-json_result <- url %>% curl() %>% readLines() %>% fromJSON()
-json_result
+#Pirates of the Caribbean, Fantastic Beasts, justice league, aquaman
+
+#url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?opening-date=2020-01-01:2022-04-24&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+url <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=johnny+depp&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+url20 <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=johnny+depp&offset=20&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+url40 <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=johnny+depp&offset=40&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+url_ah <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=amber+heard&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+url_ah20 <- 'https://api.nytimes.com/svc/movies/v2/reviews/search.json?query=amber+heard&offset=20&api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+json_result_jd <- url %>% curl() %>% readLines() %>% fromJSON()
+
+json_result20 <- url20 %>% curl() %>% readLines() %>% fromJSON
+json_result40 <- url40 %>% curl() %>% readLines() %>% fromJSON()
+
+json_result_ah <- url_ah %>% curl() %>% readLines() %>% fromJSON()
+
 ```
 
 ```{r}
-url_html <- 'https://www.nytimes.com/2019/06/06/movies/the-black-godfather-review.html'
-url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2()
+url2 <- 'https://api.nytimes.com/svc/mostpopular/v2/viewed/1.json?api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+json_result2 <- url2 %>% curl() %>% readLines() %>% fromJSON()
+json_result2
+```
+
+```{r}
+#url_html <- 'https://www.nytimes.com/2019/06/06/movies/the-black-godfather-review.html'
+#url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2()
 ```
 
 Create a function which extracts the text from each of the movie reviews using html web scraping
@@ -45,21 +63,53 @@ extract_text <- function(json_result){
     review_text <- review_text %>% add_row(headline = reviews[i,2], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
   }
   review_text <- review_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
+  review_text <- review_text[-c(1),] 
   return(review_text)
+}
+
+extract_text2 <- function(json_result){
+  reviews <- json_result %>% 
+    dplyr::select(c('display_title','headline','link$url')) %>% 
+    rename(url = link$url) %>%
+  review_text <-tibble(headline = '',text='')
+  for(i in 1:nrow(reviews)){
+    url_html <- reviews[i,3]
+    review_text <- review_text %>% add_row(headline = reviews[i,2], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
+  }
+  review_text <- review_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
+  review_text <- review_text[-c(1),] 
+  return(review_text)
+}
+
+extract_text_mp <- function(json_result){
+  articles <- json_result$results %>% 
+    dplyr::select(c('title','url'))
+  article_text <-tibble(headline = '',text='')
+  for(i in 1:nrow(articles)){
+    url_html <- articles[i,2]
+    article_text <- article_text %>% add_row(headline = articles[i,1], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
+  }
+  article_text <- article_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
+  article_text <- article_text[-c(1),] 
+  return(article_text)
 }
 ```
 
 Clean the movie review text
 
 ```{r}
-review_text <- extract_text(json_result)
+review_text <- extract_text(json_result_jd)
+review_text <- add_row(review_text, extract_text(json_result20))
+review_text <- add_row(review_text, extract_text(json_result40))
+review_text <- add_row(review_text, extract_text(json_result_ah))
 review_text <- review_text %>% mutate(
   clean_text = tolower(text),
-  clean_text = str_replace_all(clean_text,"[['`’]]", ""), 
+  clean_text = removeWords(clean_text,stop_words$word),
+  clean_text = str_replace_all(clean_text,"[['`’$+\u0097]]", ""), 
   clean_text = str_replace_all(clean_text,"[[:punct:]]", " "),
   clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
   clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
-  clean_text = removeWords(clean_text,stopwords("english")),
+  clean_text = str_replace_all(clean_text," s ", " "),
   clean_text = trimws(clean_text)) 
 
 ```
@@ -72,9 +122,7 @@ dtm_reviews
 ```
 
 ```{r}
-raw.sum=apply(dtm_reviews,1,FUN=sum)
-dtm_reviews=dtm_reviews[raw.sum!=0,]
-reviews_lda <- LDA(dtm_reviews, k = 2)
+reviews_lda <- LDA(dtm_reviews, k = 6, method = 'gibbs')
 reviews_topics <- tidy(reviews_lda)
 reviews_topics
 ```
@@ -82,16 +130,143 @@ reviews_topics
 ```{r}
 reviews_lda %>% tidy(matrix="gamma") %>%
   group_by(document) %>%
-  top_n(1)
+  top_n(1) %>%
+  mutate(document = as.numeric(document)) %>%
+  arrange(desc(document)) #%>%
+  head(8)
 ```
 
-
+c(1,4,10,14,18,19,21,24,35,46)
 ```{r}
 reviews_topics %>% filter(topic==1) %>% 
+  filter(term != 'movie', term != 'film') %>%
   mutate(beta_rank = min_rank(desc(beta))) %>% 
   filter(beta_rank <= 10) %>% 
   arrange(beta_rank) %>%
   mutate(term = reorder(term, beta)) %>% 
   ggplot(aes(beta, term)) + 
   geom_col(show.legend = FALSE)
+```
+
+
+Sentiment Analysis for movie reviews
+```{r}
+sa_text_jd = review_text[1:45,] %>% group_by(headline) %>% unnest_tokens(word, clean_text)
+
+sa_processed_text_jd = sa_text_jd %>% 
+  inner_join(get_sentiments("nrc")) %>% group_by(headline) %>% count(sentiment, sort = TRUE)
+
+sa_processed_text_jd_afinn = sa_text_jd %>% 
+  inner_join(get_sentiments("afinn"))
+
+```
+
+```{r}
+sa_processed_text_jd %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ xlab("Sentiment") + 
+  ylab("Number of Words") + 
+  ggtitle("Sentiments in Reviews of Johnny Depp's Movies") + 
+  theme(legend.position="none")
+```
+
+```{r}
+aggregate(x = sa_processed_text_jd_afinn$value, by = list(sa_processed_text_jd_afinn$headline),FUN = sum) %>% arrange(x) %>% ggplot(aes(seq(1:45), x, color=x)) +geom_bar(stat="identity") + xlab("Review Number") + ylab("Afinnity Score") + ggtitle("Afinnity of Reviews for Johnny Depp's Movies")
+```
+
+```{r}
+sa_text_ah = review_text[46:53,] %>% group_by(headline) %>% unnest_tokens(word, clean_text)
+
+sa_processed_text_ah = sa_text_ah %>% 
+  inner_join(get_sentiments("nrc")) %>% group_by(headline) %>% count(sentiment, sort = TRUE)
+```
+
+```{r}
+sa_processed_text_ah %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ xlab("Sentiment") + 
+  ylab("Number of Words") + 
+  ggtitle("Sentiments in Reviews of Amber Heard's Movies") + 
+  theme(legend.position="none")
+```
+
+```{r}
+sa_processed_text_ah_afinn = sa_text_ah %>% 
+  inner_join(get_sentiments("afinn"))
+
+aggregate(x = sa_processed_text_ah_afinn$value, by = list(sa_processed_text_ah_afinn$headline),FUN = sum) %>% arrange(x) %>% ggplot(aes(seq(1:8), x, color=x)) +geom_bar(stat="identity") + xlab("Review Number") + ylab("Afinnity Score") + ggtitle("Afinnity of Reviews for Amber Heard's Movies")
+```
+
+Most Popular Articles in the last 30 days:
+```{r}
+mp_text <- extract_text_mp(json_result2)
+mp_text <- mp_text %>% mutate(
+  clean_text = tolower(text),
+  clean_text = removeWords(clean_text,stop_words$word),
+  clean_text = str_replace_all(clean_text,"[['`’$+]]", ""), 
+  clean_text = str_replace_all(clean_text,"[[:punct:]]", " "),
+  clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
+  clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
+  clean_text = str_replace_all(clean_text," s ", " "),
+  clean_text = trimws(clean_text)) 
+
+```
+
+Turn the most popular articles text into a DTM (Document Term Matrix) for text mining.
+
+```{r}
+dtm_mp <- tm::DocumentTermMatrix(tm::VCorpus(tm::VectorSource(mp_text$clean_text)),control=list(wordLengths=c(1,Inf)))
+dtm_mp
+```
+
+```{r}
+mp_lda <- LDA(dtm_mp, k = 2)
+mp_topics <- tidy(mp_lda)
+#mp_topics
+```
+
+```{r}
+mp_lda %>% tidy(matrix="gamma") %>%
+  group_by(document) %>%
+  top_n(1)
+```
+
+
+```{r}
+mp_topics %>% filter(topic==2) %>% 
+  mutate(beta_rank = min_rank(desc(beta))) %>% 
+  filter(beta_rank <= 10) %>% 
+  arrange(beta_rank) %>%
+  mutate(term = reorder(term, beta)) %>% 
+  ggplot(aes(beta, term)) + 
+  geom_col(show.legend = FALSE)
+```
+
+```{r}
+beta_wide <- mp_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(names_from = topic, values_from = beta) %>% 
+  filter(topic1 > 0.001 | topic2 > 0.001) %>%
+  mutate(log_ratio = log2(topic2 / topic1))
+
+beta_wide %>% arrange(desc(log_ratio)) %>%
+  mutate(term = reorder(term, log_ratio)) %>% 
+  head(10) %>%
+  ggplot(aes(log_ratio, term)) + 
+  geom_col(show.legend = FALSE)
+```
+
+```{r}
+beta_wide %>% arrange(log_ratio) %>%
+  mutate(term = reorder(term, desc(log_ratio))) %>% 
+  head(10) %>%
+  ggplot(aes(log_ratio, term)) + 
+  geom_col(show.legend = FALSE)
+```
+
+
+```{r}
+mp_text %>% group_by(headline) %>%
+  unnest_tokens(word, clean_text)
+
 ```
