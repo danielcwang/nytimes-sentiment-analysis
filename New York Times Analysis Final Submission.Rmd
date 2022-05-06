@@ -1,0 +1,141 @@
+---
+title: "New York Times Analysis"
+author: "Daniel Wang, Pratiksha Sharma"
+date: '2022-05-06'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(tidyverse)
+library(httr)
+library(curl)
+library(jsonlite)
+library(rvest)
+library(tm)
+library(tidytext)
+library(topicmodels)
+library(textdata)
+```
+
+Welcome! When we first started this project, all we knew is that we wanted to take advantage of the New York Times API to do some kind of text mining analysis on various articles. After doing some initial analysis, we decided that we wanted to take you on a journey exploring what New York Times has to say about the sensational celebrity court case that has taken the nation by storm, Johnny Depp vs Amber Heard. By conducting LDA Analysis and Sentiment Analysis, we investigate and compare various aspects of the articles and reviews surrounding these two individuals.
+
+However, before we get started, let's first delve into our initial analyses and investigations into the New York Times API. Now, the NYT API is not a simple one stop shop with all of the data we need neatly put together. It is actually a collection of different API's which have different purposes. The first one we decided to investigate was the Most Popular API.
+
+First, we extracted the data from the Most Popular using a url with our free API Key which looks like:
+
+https://api.nytimes.com/svc/mostpopular/v2/viewed/1.json?api-key=YOUR-API-KEY-HERE
+
+We collected the data and used R's jsonlite to read it into a data frame. Note that due to the nature of the API, we are only able to obtain 20 articles.
+```{r echo=FALSE}
+url2 <- 'https://api.nytimes.com/svc/mostpopular/v2/viewed/1.json?api-key=52utY7TeqStbbVwadabbLam6qUdac7d5'
+json_result2 <- url2 %>% curl() %>% readLines() %>% fromJSON()
+```
+
+After obtaining the data, we discovered that it did not actually contain the contents of the most popular articles, but rather just their html links. Therefore, we had to create a function to extract the text out of these articles and compile them into one large data frame. This function uses HTML web scraping techniques to obtain the text of the article body.
+
+```{r}
+extract_text_mp <- function(json_result){
+  articles <- json_result$results %>% 
+    dplyr::select(c('title','url'))
+  article_text <-tibble(headline = '',text='')
+  for(i in 1:nrow(articles)){
+    url_html <- articles[i,2]
+    article_text <- article_text %>% add_row(headline = articles[i,1], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
+  }
+  article_text <- article_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
+  article_text <- article_text[-c(1),] 
+  return(article_text)
+}
+```
+
+Then, we use this function to extract the text from the most popular articles. After obtaining the raw text, we have to clean it to prepare it for our text mining analyses. We do so by making all the text lower case, squashing contractions, removing punctuation, and possibly most importantly, removing stop words.
+
+```{r}
+mp_text <- extract_text_mp(json_result2)
+mp_text <- mp_text %>% mutate(
+  clean_text = tolower(text),
+  clean_text = removeWords(clean_text,stop_words$word),
+  clean_text = str_replace_all(clean_text,"[['`’$+]]", ""), 
+  clean_text = str_replace_all(clean_text,"[[:punct:]]", " "),
+  clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
+  clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
+  clean_text = str_replace_all(clean_text," s ", " "),
+  clean_text = trimws(clean_text)) 
+```
+
+Now, after doing all this data cleaning and preparation, it's time to do our analysis. Let's start off with Latent Dirichlet allocation, or LDA. This is basic Topic Modelling, and the function we are using requires our data be in a Document Term Matrix, so let's take care of that first.
+
+```{r}
+dtm_mp <- tm::DocumentTermMatrix(tm::VCorpus(tm::VectorSource(mp_text$clean_text)),control=list(wordLengths=c(1,Inf)))
+dtm_mp
+```
+
+Now that our data is in the form of a DTM, we can easily run a LDA model on it. Let's split our articles into two topics.
+
+```{r}
+mp_lda <- LDA(dtm_mp, control = list(seed=0), k = 3)
+mp_topics <- tidy(mp_lda)
+```
+
+Using this model, we have now separated our articles into 2 models. Let's take a look at the 10 most popular words in each topic.
+
+Topic 1:
+```{r echo = FALSE}
+mp_topics %>% filter(topic==1) %>% 
+  mutate(beta_rank = min_rank(desc(beta))) %>% 
+  filter(beta_rank <= 10) %>% 
+  arrange(beta_rank) %>%
+  mutate(term = reorder(term, beta)) %>% 
+  ggplot(aes(beta, term)) + 
+  geom_col(show.legend = FALSE)
+
+```
+
+Topic 2:
+```{r echo = FALSE}
+mp_topics %>% filter(topic==3) %>% 
+  mutate(beta_rank = min_rank(desc(beta))) %>% 
+  filter(beta_rank <= 10) %>% 
+  arrange(beta_rank) %>%
+  mutate(term = reorder(term, beta)) %>% 
+  ggplot(aes(beta, term)) + 
+  geom_col(show.legend = FALSE)
+```
+
+(Note that these results are different than the ones in our presentation because our call to the API retrieves the most popular articles in the last day)
+
+Our second topic is likely centered around the economy and environment and similar domestic issues, whereas for Topic 1, we have a clear legal theme. We can specifically pinpoint the hot button issues of the recent Supreme Court leak which suggests the overturning of Roe v. Wade, and of course, the Amber Heard and Johnny Depp case.
+
+Since we have two topics, we can also do a further analysis to see which words are especially more prevalent in one topic but not the other. We do this for words that at least have a minimal probability in one of the two topics. To do this, we use a log comparison between the probability that a word appears in one topic vs the other.
+
+```{r}
+beta_wide <- mp_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(names_from = topic, values_from = beta) %>% 
+  filter(topic1 > 0.001 | topic2 > 0.001) %>%
+  mutate(log_ratio = log2(topic2 / topic1))
+```
+
+These words are more prevalent in Topic 1.
+
+```{r echo = FALSE}
+beta_wide %>% arrange(desc(log_ratio)) %>%
+  mutate(term = reorder(term, log_ratio)) %>% 
+  head(10) %>%
+  ggplot(aes(log_ratio, term)) + 
+  geom_col(show.legend = FALSE)
+```
+
+These words are more prevalent in Topic 2.
+
+```{r echo = FALSE}
+beta_wide %>% arrange(log_ratio) %>%
+  mutate(term = reorder(term, desc(log_ratio))) %>% 
+  head(10) %>%
+  ggplot(aes(log_ratio, term)) + 
+  geom_col(show.legend = FALSE)
+```
+
+
+Using these graphs we can corroborate the fact that Topic 1 has an economics theme, but we get to see that Topic 2 also has a foreign affairs theme in addition to its legal theme. (Note that this suggests that splitting the articles into more than 2 topics would likely be beneficial, but to keep consistent with our presentation, and since we have many more analyses to go, we will be leaving it at 2)
