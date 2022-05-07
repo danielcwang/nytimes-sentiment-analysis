@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE)
 library(tidyverse)
 library(httr)
 library(curl)
@@ -62,7 +62,11 @@ mp_text <- mp_text %>% mutate(
   clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
   clean_text = str_replace_all(clean_text," s ", " "),
   clean_text = trimws(clean_text)) 
+# Saving CSV file
+write.csv(mp_text,"most_popular_text.csv", row.names = FALSE)
 ```
+
+Also, note that we export the clean text data to a csv file which is attached in this repository and can be used for the following analyses. We also do this every time we extract and clean text, so for the upcoming movie reviews and article search data frames. Feel free to use these csv files to follow along with our analyses.
 
 Now, after doing all this data cleaning and preparation, it's time to do our analysis. Let's start off with Latent Dirichlet allocation, or LDA. This is basic Topic Modelling, and the function we are using requires our data be in a Document Term Matrix, so let's take care of that first.
 
@@ -149,9 +153,11 @@ sa_text = mp_text %>% group_by(headline) %>% unnest_tokens(word, clean_text)
 
 Now, we start by using NRC sentiment analysis on these most popular articles and plot these sentiments
 
-```{r}
+```{r message=FALSE}
 sa_processed_text = sa_text %>% inner_join(get_sentiments("nrc")) %>% group_by(headline) %>% count(sentiment, sort = TRUE)
+```
 
+```{r echo=FALSE}
 # Now, we plot this:
 
 sa_processed_text %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Sentiments in Most Popular Articles") + theme(legend.position="none")
@@ -163,10 +169,10 @@ But, as mentioned before, the apparent hot topic is that of the Johnny Depp v. A
 
 We generate plots that show NRC and Bing analysis on it:
 
-```{r}
-sa_text %>% filter(headline == "Johnny Depp v. Amber Heard: What We Know") %>% inner_join(get_sentiments("nrc")) %>% count(sentiment, sort = TRUE) %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Johnny Depp v. Amber Heard: NRC SA") + theme(legend.position="none")
+```{r echo=FALSE}
+sa_text %>% filter(headline == "Amber Heard Testifies About a ‘Pattern’ of Violence by Johnny Depp") %>% inner_join(get_sentiments("nrc")) %>% count(sentiment, sort = TRUE) %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Johnny Depp v. Amber Heard: NRC SA") + theme(legend.position="none")
 
-sa_text %>% filter(headline == "Johnny Depp v. Amber Heard: What We Know") %>% inner_join(get_sentiments("bing")) %>% count(sentiment, sort = TRUE) %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Johnny Depp v. Amber Heard: Bing SA") + theme(legend.position="none")
+sa_text %>% filter(headline == "Amber Heard Testifies About a ‘Pattern’ of Violence by Johnny Depp") %>% inner_join(get_sentiments("bing")) %>% count(sentiment, sort = TRUE) %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Johnny Depp v. Amber Heard: Bing SA") + theme(legend.position="none")
 ```
 
 The graphs above show that the overall topic has a very negative sentiment attached to it as seen through analysis of this article. Negative, fear and anger are leading emotions in nrc and negative is extremely dominant in the bing analysis as well.
@@ -181,7 +187,14 @@ Below, we aggregate and assign an affinity score to each article that are most p
 
 ```{r}
 sa_text_agg = sa_text %>% inner_join(get_sentiments("afinn"))  
-aggregate(x = sa_text_agg$value, by = list(sa_text_agg$headline),FUN = sum) %>% arrange(x) %>% ggplot(aes(seq(1:20), x)) + geom_bar(stat = "identity") + xlab("Dummy Article Number") + ylab("Afinnity Score") + ggtitle("Afinnity of Most Popular Articles") + theme(legend.position="none")
+aggregate(x = sa_text_agg$value, by = list(sa_text_agg$headline),FUN = sum) %>%
+  arrange(x) %>%
+  ggplot(aes(seq(1:20), x)) +
+  geom_bar(stat = "identity") + 
+  xlab("Dummy Article Number") + 
+  ylab("Afinnity Score") + 
+  ggtitle("Afinnity of Most Popular Articles") + 
+  theme(legend.position="none")
 ```
 
 Note: Article numbers are dummy here
@@ -230,8 +243,10 @@ review_text <- review_text %>% mutate(
   clean_text = str_replace_all(clean_text," s ", " "),
   clean_text = trimws(clean_text)) 
 
+# Saving CSV file
+write.csv(review_text,"movie_review_text.csv", row.names = FALSE)
+
 dtm_reviews <- tm::DocumentTermMatrix(tm::VCorpus(tm::VectorSource(review_text$clean_text)),control=list(wordLengths=c(1,Inf)))
-dtm_reviews
 ```
 
 Let's jump straight into the LDA analysis. We were especially interested in seeing if the algorithm would differentiate between Amber Heard and Johnny Depp's movies. However, since the algorithm tends to keep the sizes of each topic at a relatively similar length and Johnny Depp has far more reviews than Amber Heard, we try separating the reviews into 6 topics.
@@ -243,7 +258,7 @@ reviews_topics <- tidy(reviews_lda)
 
 Next, we check the topics for the last 8 movies, which are the reviews for Amber Heard's movies.
 
-```{r echo = FALSE}
+```{r}
 reviews_lda %>% tidy(matrix="gamma") %>%
   group_by(document) %>%
   top_n(1) %>%
@@ -355,7 +370,7 @@ For the final portion of our project, we look into the personal lives and relati
 
 This is going to be a Temporal Sentiment Analysis of their relationship. 
 
-We shall use the NYT's Article Search API for this purpose to pull up any articles on Johnny Depp and Amber Heard. Everything from when their realtionship in 2015 till now. 
+We shall use the NYT's Article Search API for this purpose to pull up any articles on Johnny Depp and Amber Heard. Everything from when their relationship in 2015 till now. The Article Search API works a little differently than the other API's so we had to change some of the extraction code.
 
 Note: the results may have changed since the presentation
 
@@ -364,7 +379,8 @@ We start by using the code below:
 NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
 baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard+trial","&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
 pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
-jd_ah_trial = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+jd_ah_trial = pages_new %>% 
+  select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
 for (index in 1:nrow(jd_ah_trial)){
   jd_ah_trial$pub_date[index] = jd_ah_trial$pub_date[index] %>% substr(1,10)
 }
@@ -388,8 +404,11 @@ for (index in 1:nrow(jd_ah_trial)){
 jd_ah_trial$pub_date = as.Date(jd_ah_trial$pub_date)
 jd_ah_trial = jd_ah_trial %>% arrange(pub_date)
 jd_ah_trial$author = str_replace_all(jd_ah_trial$author,"By ", "")
+```
 
+As you can see, we took articles from a specific time frame. We then increased the time frame to get more articles (code not shown) and merged the two data frames with the following code:
 
+```{r echo=FALSE}
 begin_date = 20160101
 end_date = 20170101
 NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
@@ -402,10 +421,14 @@ for (index in 1:nrow(new)){
 new$pub_date = as.Date(new$pub_date)
 new = new %>% arrange(pub_date)
 new$author = str_replace_all(new$author,"By ", "")
+```
 
+```{r}
 # We have to keep merging the data
 jd_ah_trial = rbind(jd_ah_trial, new)
+```
 
+```{r echo=FALSE}
 begin_date = 20170101
 end_date = 20180101
 NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
@@ -455,11 +478,11 @@ new$author = str_replace_all(new$author,"By ", "")
 jd_ah_trial = rbind(jd_ah_trial, new)
 ```
 
-Now that we have a good collection of 35 articles with search key johnny+depp+amber+heard since 2015, we move forward to our temporal analysis
+After doing this five times we have a good collection of 35 articles with search key johnny+depp+amber+heard since 2015, we move forward to our temporal analysis
 
-First, extract text and clean it
+First, we extract the text and clean it which uses similar code to the previous times we did it.
 
-```{r}
+```{r echo = FALSE}
 extract_text_article <- function(df){
   sa_text <-tibble(headline = '',text='')
   for(i in 1:nrow(df)){
@@ -471,7 +494,7 @@ extract_text_article <- function(df){
 }
 ```
 
-```{r}
+```{r echo = FALSE}
 sa_clean_text <- extract_text_article(jd_ah_trial)
 sa_clean_text = sa_clean_text[-c(1),]
 sa_clean_text <- sa_clean_text %>% mutate(
@@ -482,33 +505,30 @@ sa_clean_text <- sa_clean_text %>% mutate(
   clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
   clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
   clean_text = trimws(clean_text)) 
+
+# Saving CSV file
+write.csv(sa_clean_text,"temporal_sentiment_analysis_text.csv", row.names = FALSE)
 ```
 
-Second, separating words for Sentiment Analysis
+Second, we separate the words for Sentiment Analysis
 
 ```{r}
 sa_clean_text = sa_clean_text %>% group_by(headline) %>% unnest_tokens(word, clean_text)
 ```
 
-Third, performing sentiment analysis and plotting results
+Third, we perform sentiment analysis and plot the results. First we do NRC, and then use a left join to get the publication dates from the articles so that we can do a temporal sentiment analysis.
 
 ```{r}
 temporal_sentiments = sa_clean_text %>% inner_join(get_sentiments("nrc")) %>% group_by(headline) %>% count(sentiment)
-temporal_sentiments
-```
 
-```{r}
 temporal_sentiments %>% left_join(jd_ah_trial, by = "headline") %>% select(c(headline, sentiment, n, pub_date)) %>% arrange(pub_date) %>% mutate(prop = n/sum(n)) %>% ggplot(aes(pub_date, prop, color = sentiment)) + geom_line() + xlab('Time') + ylab('Magnitude of Sentiment') + ggtitle('Temporal NRC Sentiment Analysis: Johnny Depp v. Amber Heard')
 ```
 
-We also perform Bing Sentiment Analysis
+We also repeat for Bing Sentiment Analysis
 
-```{r}
+```{r echo=FALSE}
 temporal_sentiments = sa_clean_text %>% inner_join(get_sentiments("bing")) %>% group_by(headline) %>% count(sentiment)
-temporal_sentiments
-```
 
-```{r}
 temporal_sentiments %>% left_join(jd_ah_trial, by = "headline") %>% select(c(headline, sentiment, n, pub_date)) %>% arrange(pub_date) %>% ggplot(aes(pub_date, n, color = sentiment)) + geom_line() + xlab('Time') + ylab('Magnitude of Sentiment') + ggtitle('Temporal Bing Sentiment Analysis: Johnny Depp v. Amber Heard')
 ```
 
