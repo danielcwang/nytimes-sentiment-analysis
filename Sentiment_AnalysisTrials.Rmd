@@ -369,6 +369,7 @@ extract_text_article <- function(df){
 ```{r}
 sa_clean_text <- extract_text_article(jd_ah_trial)
 sa_clean_text = sa_clean_text[-c(1),]
+
 sa_clean_text <- sa_clean_text %>% mutate(
   clean_text = tolower(text),
   clean_text = removeWords(clean_text,stop_words$word),
@@ -377,6 +378,10 @@ sa_clean_text <- sa_clean_text %>% mutate(
   clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
   clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
   clean_text = trimws(clean_text)) 
+
+
+# Saving CSV file
+write.csv(sa_clean_text,"temporal_sentiment_analysis_text.csv", row.names = FALSE)
 ```
 
 Separating words for Sentiment Analysis

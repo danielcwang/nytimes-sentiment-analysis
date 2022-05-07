@@ -140,11 +140,53 @@ beta_wide %>% arrange(desc(log_ratio)) %>%
 Using these graphs we can corroborate the fact that Topic 1 has a legal theme and Topic 2 has a political theme.
 
 We also did sentiment analysis on these most popular articles.
-.
-.
-.
 
-After deciding to focus on the issue of Johnny Depp and Amber Heard, we first wanted to explore their professional lives by taking advantage of the NYT Movie Reviews API. So we queried the API for all movie reviews containing either Johnny Depp or Amber Heard and then performing various analyses to compare their work.
+This code unnests the article texts into words which facilitates sentiment analysis
+
+```{r}
+sa_text = mp_text %>% group_by(headline) %>% unnest_tokens(word, clean_text)
+```
+
+Now, we start by using NRC sentiment analysis on these most popular articles and plot these sentiments
+
+```{r}
+sa_processed_text = sa_text %>% inner_join(get_sentiments("nrc")) %>% group_by(headline) %>% count(sentiment, sort = TRUE)
+
+# Now, we plot this:
+
+sa_processed_text %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Sentiments in Most Popular Articles") + theme(legend.position="none")
+```
+
+The graph shows us that the articles had a majorly positive sentiment. 
+
+But, as mentioned before, the apparent hot topic is that of the Johnny Depp v. Amber Heard Trial, so we pick up an article about that and look closely at it for specific sentiment analysis.
+
+We generate plots that show NRC and Bing analysis on it:
+
+```{r}
+sa_text %>% filter(headline == "Johnny Depp v. Amber Heard: What We Know") %>% inner_join(get_sentiments("nrc")) %>% count(sentiment, sort = TRUE) %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Johnny Depp v. Amber Heard: NRC SA") + theme(legend.position="none")
+
+sa_text %>% filter(headline == "Johnny Depp v. Amber Heard: What We Know") %>% inner_join(get_sentiments("bing")) %>% count(sentiment, sort = TRUE) %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Sentiment") + ylab("Number of Words") + ggtitle("Johnny Depp v. Amber Heard: Bing SA") + theme(legend.position="none")
+```
+
+The graphs above show that the overall topic has a very negative sentiment attached to it as seen through analysis of this article. Negative, fear and anger are leading emotions in nrc and negative is extremely dominant in the bing analysis as well.
+
+It would be interesting to further look into Johnny Depp, Amber Heard, individually and their relationship. 
+
+We have to switch gears to another New York Times API here, but before doing that, we perform one final Aggregate Afinnity Score Analysis on the most popular articles. 
+
+But simply finding afinn scores for each word in the article does not make a lot of sense since the result does not portray an overall sentiment for a particular article. For NRC and Bing, you can filter results for a particular movie and the observations make sense, but there needs to be some aggregation required for afinn results to make sense.
+
+Below, we aggregate and assign an affinity score to each article that are most popular and plot these scores:
+
+```{r}
+sa_text_agg = sa_text %>% inner_join(get_sentiments("afinn"))  
+aggregate(x = sa_text_agg$value, by = list(sa_text_agg$headline),FUN = sum) %>% arrange(x) %>% ggplot(aes(seq(1:20), x)) + geom_bar(stat = "identity") + xlab("Dummy Article Number") + ylab("Afinnity Score") + ggtitle("Afinnity of Most Popular Articles") + theme(legend.position="none")
+```
+
+Note: Article numbers are dummy here
+
+Moving on, after deciding to focus on the issue of Johnny Depp and Amber Heard, we first wanted to explore their professional lives by taking advantage of the NYT Movie Reviews API. So we queried the API for all movie reviews containing either Johnny Depp or Amber Heard and then performing various analyses to compare their work.
 
 We omit the code for extracting and cleaning the data as it is nearly identical to the code for the most popular articles, but note that with this API we can paginate through results to get more than 20 reviews by querying the API multiple times. We retrieved a total of 53 movie reviews, 45 featuring Johnny Depp and 8 featuring Amber Heard.
 
@@ -310,3 +352,174 @@ aggregate(x = sa_processed_text_ah_afinn$value, by = list(sa_processed_text_ah_a
 All these results in tandem seem to suggest that Johnny Depp's movies generally are much more positively received than Amber Heard's movies.
 
 For the final portion of our project, we look into the personal lives and relationship between Johnny Depp and Amber Heard, as seen through the eyes of New York Times Articles written about them.
+
+This is going to be a Temporal Sentiment Analysis of their relationship. 
+
+We shall use the NYT's Article Search API for this purpose to pull up any articles on Johnny Depp and Amber Heard. Everything from when their realtionship in 2015 till now. 
+
+Note: the results may have changed since the presentation
+
+We start by using the code below:
+```{r}
+NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard+trial","&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
+pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
+jd_ah_trial = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+for (index in 1:nrow(jd_ah_trial)){
+  jd_ah_trial$pub_date[index] = jd_ah_trial$pub_date[index] %>% substr(1,10)
+}
+jd_ah_trial$pub_date = as.Date(jd_ah_trial$pub_date)
+jd_ah_trial = jd_ah_trial %>% arrange(pub_date)
+jd_ah_trial$author = str_replace_all(jd_ah_trial$author,"By ", "")
+```
+
+But this is only giving us a few articles. The results are probably being limited, so we will specify time intervals and run this code repeatedly to get more data printed/published over the years. Below is the modified version.
+
+```{r}
+begin_date = 20150101
+end_date = 20160101
+NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard","&begin_date=",begin_date,"&end_date=",end_date,"&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
+pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
+jd_ah_trial = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+for (index in 1:nrow(jd_ah_trial)){
+  jd_ah_trial$pub_date[index] = jd_ah_trial$pub_date[index] %>% substr(1,10)
+}
+jd_ah_trial$pub_date = as.Date(jd_ah_trial$pub_date)
+jd_ah_trial = jd_ah_trial %>% arrange(pub_date)
+jd_ah_trial$author = str_replace_all(jd_ah_trial$author,"By ", "")
+
+
+begin_date = 20160101
+end_date = 20170101
+NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard","&begin_date=",begin_date,"&end_date=",end_date,"&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
+pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
+new = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+for (index in 1:nrow(new)){
+  new$pub_date[index] = new$pub_date[index] %>% substr(1,10)
+}
+new$pub_date = as.Date(new$pub_date)
+new = new %>% arrange(pub_date)
+new$author = str_replace_all(new$author,"By ", "")
+
+# We have to keep merging the data
+jd_ah_trial = rbind(jd_ah_trial, new)
+
+begin_date = 20170101
+end_date = 20180101
+NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard","&begin_date=",begin_date,"&end_date=",end_date,"&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
+pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
+new = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+for (index in 1:nrow(new)){
+  new$pub_date[index] = new$pub_date[index] %>% substr(1,10)
+}
+new$pub_date = as.Date(new$pub_date)
+new = new %>% arrange(pub_date)
+new$author = str_replace_all(new$author,"By ", "")
+
+# We have to keep merging the data
+jd_ah_trial = rbind(jd_ah_trial, new)
+
+begin_date = 20180101
+end_date = 2020101
+NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard","&begin_date=",begin_date,"&end_date=",end_date,"&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
+pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
+new = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+for (index in 1:nrow(new)){
+  new$pub_date[index] = new$pub_date[index] %>% substr(1,10)
+}
+new$pub_date = as.Date(new$pub_date)
+new = new %>% arrange(pub_date)
+new$author = str_replace_all(new$author,"By ", "")
+
+# We have to keep merging the data
+jd_ah_trial = rbind(jd_ah_trial, new)
+
+begin_date = 20200101
+end_date = 20220505
+NYTIMES_KEY = "ltnSuqlZoDGg6Td519vELgT8Fncs2Bq7"
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=","johnny+depp+amber+heard","&begin_date=",begin_date,"&end_date=",end_date,"&facet_filter=true&api-key=",NYTIMES_KEY, sep="")
+pages_new = fromJSON(baseurl, flatten = TRUE) %>% data.frame() 
+new = pages_new %>% select(abstract = response.docs.abstract, url_html = response.docs.web_url, lead_para = response.docs.lead_paragraph, pub_date = response.docs.pub_date, headline = response.docs.headline.main, author = response.docs.byline.original)
+for (index in 1:nrow(new)){
+  new$pub_date[index] = new$pub_date[index] %>% substr(1,10)
+}
+new$pub_date = as.Date(new$pub_date)
+new = new %>% arrange(pub_date)
+new$author = str_replace_all(new$author,"By ", "")
+
+# We have to keep merging the data
+jd_ah_trial = rbind(jd_ah_trial, new)
+```
+
+Now that we have a good collection of 35 articles with search key johnny+depp+amber+heard since 2015, we move forward to our temporal analysis
+
+First, extract text and clean it
+
+```{r}
+extract_text_article <- function(df){
+  sa_text <-tibble(headline = '',text='')
+  for(i in 1:nrow(df)){
+    url_html <- df$url_html[i]
+    sa_text <- sa_text %>% add_row(headline = df$headline[i], text = url_html %>% read_html() %>% html_nodes("section") %>% html_nodes("p") %>% html_text2())
+  }
+  sa_text <- sa_text %>% group_by(headline) %>% summarise(text = paste(text,collapse = " "))
+  return(sa_text)
+}
+```
+
+```{r}
+sa_clean_text <- extract_text_article(jd_ah_trial)
+sa_clean_text = sa_clean_text[-c(1),]
+sa_clean_text <- sa_clean_text %>% mutate(
+  clean_text = tolower(text),
+  clean_text = removeWords(clean_text,stop_words$word),
+  clean_text = str_replace_all(clean_text,"['`’”“]", ""), 
+  clean_text = str_replace_all(clean_text,"[[:punct:]]", " "),
+  clean_text = str_replace_all(clean_text,'[[:digit:]]+', " "),
+  clean_text = str_replace_all(clean_text,"[[:space:]]+", " "),
+  clean_text = trimws(clean_text)) 
+```
+
+Second, separating words for Sentiment Analysis
+
+```{r}
+sa_clean_text = sa_clean_text %>% group_by(headline) %>% unnest_tokens(word, clean_text)
+```
+
+Third, performing sentiment analysis and plotting results
+
+```{r}
+temporal_sentiments = sa_clean_text %>% inner_join(get_sentiments("nrc")) %>% group_by(headline) %>% count(sentiment)
+temporal_sentiments
+```
+
+```{r}
+temporal_sentiments %>% left_join(jd_ah_trial, by = "headline") %>% select(c(headline, sentiment, n, pub_date)) %>% arrange(pub_date) %>% mutate(prop = n/sum(n)) %>% ggplot(aes(pub_date, prop, color = sentiment)) + geom_line() + xlab('Time') + ylab('Magnitude of Sentiment') + ggtitle('Temporal NRC Sentiment Analysis: Johnny Depp v. Amber Heard')
+```
+
+We also perform Bing Sentiment Analysis
+
+```{r}
+temporal_sentiments = sa_clean_text %>% inner_join(get_sentiments("bing")) %>% group_by(headline) %>% count(sentiment)
+temporal_sentiments
+```
+
+```{r}
+temporal_sentiments %>% left_join(jd_ah_trial, by = "headline") %>% select(c(headline, sentiment, n, pub_date)) %>% arrange(pub_date) %>% ggplot(aes(pub_date, n, color = sentiment)) + geom_line() + xlab('Time') + ylab('Magnitude of Sentiment') + ggtitle('Temporal Bing Sentiment Analysis: Johnny Depp v. Amber Heard')
+```
+
+From the results obtained, we see that their relationship started out quite positive. And, that along with Joy were top sentiments for the most part which is until 2020. This is even after they got divorced; which makes sense since at the time, their separation was believed to be extremely respectful and mutual. There were no offensively outrageous reasons such as Domestic Violence or Abuse attached to it.
+
+There wasn't much conversation after the private separation which is why we see the graphs sort of flattening between 2020 and 2022.
+
+But, the story took started turning in 2022, when the lawsuits started, and the controversial op-eds came out. The overall sentiment portrayed is extremely negative, along with fear and anticipation on the rise. The world and the media is taken aback by the horrifying revelations during trial and have deeply condemned Amber Heard in their speech. Positive things have been spoken about Johnny Depp, but the magnitude of that sentiment is nothing as compared to the negativity. 
+
+At this point, as the trial goes on, we expect to see more negativity towards the actors as the world sees past shiny curtain of Hollywood Celebrities and their complicated lives. 
+
+Overall, our temporal sentiment analysis has agreed well with our understanding of the relationship that these two actors might have had and are having right now. We hope justice prevails through the trial, and would be interested in further using LDA topic modelling and Sentiment Analysis in future over this subject. 
+
+Thank You!
