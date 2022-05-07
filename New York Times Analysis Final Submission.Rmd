@@ -245,9 +245,10 @@ sa_processed_text_jd %>% ggplot(aes(reorder(sentiment,-n), n, color = sentiment)
   theme(legend.position="none")
 
 ```
+
 Then, Amber Heard.
 
-```{r echo = FALSE, message = TRUE}
+```{r echo = FALSE, message = FALSE}
 sa_text_ah = review_text[46:53,] %>% group_by(headline) %>% unnest_tokens(word, clean_text)
 
 sa_processed_text_ah = sa_text_ah %>% 
